@@ -1,0 +1,321 @@
+---
+title: "Bikeshare_DivvyTrips"
+author: "Kaleb Politte"
+date: "2025-05-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+## Introduction
+
+This report analyzes Divvy bike-sharing data for Q1 2019 and Q1 2020 in order to understand the behavior patterns of our customers and identify strategies to better market to casual riders, with the goal of converting them into annual subscribers.
+
+---
+
+
+
+```{r load_data, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(lubridate)
+library(readr)
+library(scales)
+
+# Function to load and clean data for a given quarter and year
+load_and_clean_data <- function(file_name, year) {
+  df <- read_csv(file_name)
+  
+  if (year == 2019) {
+    df_cleaned <- df %>%
+      mutate(
+        tripduration = as.numeric(gsub(",", "", tripduration)),
+        started_at = as.POSIXct(start_time, format = "%Y-%m-%d %H:%M:%S"),
+        ended_at = as.POSIXct(end_time, format = "%Y-%m-%d %H:%M:%S"),
+        tripduration_minutes = tripduration / 60
+      ) %>%
+      filter(trip_id != 21920842, tripduration_minutes <= 14400) %>%
+      mutate(
+        birthyear = na_if(birthyear, 1900),
+        tripduration_minutes_rounded = round(tripduration_minutes)
+      ) %>%
+      select(
+        from_station_name,
+        to_station_name,
+        usertype,
+        tripduration_minutes,
+        started_at,
+        ended_at
+      )
+  } else if (year == 2020) {
+    df_cleaned <- df %>%
+      mutate(
+        started_at = as.POSIXct(started_at, format = "%Y-%m-%d %H:%M:%S"),
+        ended_at = as.POSIXct(ended_at, format = "%Y-%m-%d %H:%M:%S"),
+        trip_duration_seconds = as.numeric(difftime(ended_at, started_at, units = "secs")),
+        tripduration_minutes = trip_duration_seconds / 60
+      ) %>%
+      filter(tripduration_minutes > 0, tripduration_minutes <= 14400) %>%
+      mutate(usertype = ifelse(member_casual == "member", "Subscriber", "Customer")) %>%
+      select(
+        from_station_name = start_station_name,
+        to_station_name = end_station_name,
+        usertype,
+        tripduration_minutes,
+        started_at,
+        ended_at
+      )
+  } else {
+    stop("Year must be 2019 or 2020")
+  }
+  return(df_cleaned)
+}
+
+# Load and clean data for Q1 2019 and Q1 2020
+q1_2019_data <- load_and_clean_data("Q1_2019_DivvyTrips.csv", 2019)
+q1_2020_data <- load_and_clean_data("Q1_2020_DivvyTrips.csv", 2020)
+
+# Combine the dataframes
+all_trips <- rbind(q1_2019_data, q1_2020_data) %>%
+  mutate(
+    weekday = wday(started_at, label = TRUE),
+    rounded_duration = round(tripduration_minutes),
+    hour_started = hour(started_at),
+    hour_ended = hour(ended_at)
+  )
+```
+
+---
+
+## Analysis
+
+### Average Trip Duration by User Type and Weekday
+
+```{r avg_trip_duration, echo=FALSE}
+# Calculate average trip duration by user type and weekday
+avg_duration <- all_trips %>%
+  group_by(usertype, weekday) %>%
+  summarise(
+    average_duration = mean(rounded_duration, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Create the plot
+plot_avg_duration <- ggplot(avg_duration, aes(x = weekday, y = average_duration, fill = usertype)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Average Trip Duration by User Type and Weekday",
+    x = "Day of the Week",
+    y = "Average Trip Duration (minutes)",
+    fill = "User Type"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold")
+  ) +
+  scale_fill_manual(values = c("Customer" = "salmon", "Subscriber" = "turquoise"))
+
+print(plot_avg_duration)
+```
+
+Casual riders tend to take longer and fewer rides per day, with average durations consistently over 40 minutes. This behavior likely stems from leisure, tourism, and nightlife activities.
+
+---
+
+### Total Trips per Day by User Type
+
+```{r total_trips_by_day, echo=FALSE}
+# Calculate total trips by user type and weekday
+total_trips_weekday <- all_trips %>%
+  group_by(usertype, weekday) %>%
+  summarise(total_trips = n(), .groups = "drop")
+
+# Create the plot
+plot_total_trips <- ggplot(total_trips_weekday, aes(x = weekday, y = total_trips, fill = usertype)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Total Trips per Day by User Type",
+    x = "Day of the Week",
+    y = "Number of Trips",
+    fill = "User Type"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(face = "bold")) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_fill_manual(values = c("Customer" = "salmon", "Subscriber" = "turquoise"))
+
+print(plot_total_trips)
+```
+
+Annual subscribers account for over 90% of trips, with average trip durations between 8–15 minutes. This pattern is consistent with regular commuting behavior.
+
+---
+
+### Top 10 Start & End Stations for Customers
+
+```{r top_customer_stations, echo=FALSE}
+# Top Stations for Customers (Start & End)
+top_customer_stations <- all_trips %>%
+  filter(usertype == "Customer") %>%
+  gather(key = "start_end", value = "station_name", from_station_name, to_station_name) %>%
+  group_by(station_name, start_end) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  top_n(10, count) %>%
+  ungroup()
+
+plot_top_stations <- ggplot(top_customer_stations, aes(x = station_name, y = count, fill = start_end)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Top 10 Start & End Stations (Customers)",
+    x = "Station Name",
+    y = "Number of Trips",
+    fill = "Station Type"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+        plot.title = element_text(face = "bold")) +
+  facet_wrap(~ start_end, scales = "free_y")
+
+print(plot_top_stations)
+```
+
+The most common stations for starting trips are nearly identical to the most popular ending stations for casual riders, although riders typically do not return bikes to their starting location.
+
+---
+
+### Peak Starting and Ending Hours
+
+#### Customers
+
+```{r peak_start_hours_customers, echo=FALSE}
+# Peak Start Hours for Customers
+customer_peak_start_hours <- all_trips %>%
+  filter(usertype == "Customer") %>%
+  group_by(hour_started) %>%
+  summarise(start_ride_count = n(), .groups = "drop") %>%
+  top_n(10, start_ride_count)
+
+plot_peak_start_hours <- ggplot(customer_peak_start_hours,
+                                aes(x = as.factor(hour_started), y = start_ride_count, fill = "Customer")) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Peak Starting Hours for Customers",
+    x = "Hour of Day",
+    y = "Number of Rides Started",
+    fill = "User Type"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold")) +
+  scale_fill_manual(values = c("Customer" = "salmon"))
+
+print(plot_peak_start_hours)
+```
+
+Casual riders are more likely to start their rides later in the day compared to annual members.
+
+```{r peak_end_hours_customers, echo=FALSE}
+# Peak End Hours for Customers
+customer_peak_end_hours <- all_trips %>%
+  filter(usertype == "Customer") %>%
+  group_by(hour_ended) %>%
+  summarise(end_ride_count = n(), .groups = "drop") %>%
+  top_n(10, end_ride_count)
+
+plot_peak_end_hours <- ggplot(customer_peak_end_hours,
+                              aes(x = as.factor(hour_ended), y = end_ride_count, fill = "Customer")) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Peak Ending Hours for Customers",
+    x = "Hour of Day",
+    y = "Number of Rides Ended",
+    fill = "User Type"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold")) +
+  scale_fill_manual(values = c("Customer" = "salmon"))
+
+print(plot_peak_end_hours)
+```
+
+Casual riders tend to end their trips between 4 pm and 6 pm, which supports the idea that their rides are often for leisure or tourism.
+
+
+
+#### Subscribers
+
+```{r peak_start_hours_subscribers, echo=FALSE}
+# Peak Start Hours for Subscribers
+subscriber_peak_start_hours <- all_trips %>%
+  filter(usertype == "Subscriber") %>%
+  group_by(hour_started) %>%
+  summarise(start_ride_count = n(), .groups = "drop") %>%
+  top_n(10, start_ride_count)
+
+plot_peak_start_hours_sub <- ggplot(subscriber_peak_start_hours,
+                                    aes(x = as.factor(hour_started), y = start_ride_count, fill = "Subscriber")) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Peak Starting Hours for Subscribers",
+    x = "Hour of Day",
+    y = "Number of Rides Started",
+    fill = "User Type"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold")) +
+  scale_fill_manual(values = c("Subscriber" = "turquoise"))
+
+print(plot_peak_start_hours_sub)
+```
+
+Subscribers typically start their rides early in the morning, likely for commuting to work.
+
+```{r peak_end_hours_subscribers, echo=FALSE}
+# Peak End Hours for Subscribers
+subscriber_peak_end_hours <- all_trips %>%
+  filter(usertype == "Subscriber") %>%
+  group_by(hour_ended) %>%
+  summarise(end_ride_count = n(), .groups = "drop") %>%
+  top_n(10, end_ride_count)
+
+plot_peak_end_hours_sub <- ggplot(subscriber_peak_end_hours,
+                                  aes(x = as.factor(hour_ended), y = end_ride_count, fill = "Subscriber")) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Peak Ending Hours for Subscribers",
+    x = "Hour of Day",
+    y = "Number of Rides Ended",
+    fill = "User Type"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold")) +
+  scale_fill_manual(values = c("Subscriber" = "turquoise"))
+
+print(plot_peak_end_hours_sub)
+```
+
+Subscriber data shows peaks in both early afternoon and mid-to-late evenings, consistent with typical commute times.
+
+---
+
+## Conclusion
+
+This report has analyzed Divvy bike-share data from Q1 2019 and Q1 2020 to understand how to convert casual riders into annual members. Key findings include:
+
+- Annual subscribers account for over 90% of total trips, with average durations ranging from 8 to 15 minutes, suggesting regular commuting.
+- Casual riders take longer, less frequent rides, likely for leisure or tourism, and tend to ride later in the day.
+
+These insights suggest opportunities to increase annual memberships by targeting casual riders with promotions focused on the benefits of regular use, such as commuting or daily errands.
+
+---
+
+## Next Steps
+
+- **Create a targeted holiday sale:** Offer special holiday promotions for app users.
+- **Collaborate with local attractions:** Partner with destinations such as the aquarium to provide incentives (e.g., a free ticket/month with subscription).
+- **Target casual rider stations:** Focus marketing at stations most frequently used by casual riders.
+
+
+---
