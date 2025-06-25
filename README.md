@@ -4,23 +4,19 @@
 ## the goal of the study is to convert these casual customers into full service subscriptions to increase profitablity.
 
 
-# Bikeshare_DivvyTrips
-# Author: Kaleb Politte
-# Date: 2025-05-20
+### Bikeshare_DivvyTrips
+### Author: Kaleb Politte
+### Date: 2025-05-20
 
-# ---- Introduction ----
-# This script analyzes Divvy bike-sharing data for Q1 2019 and Q1 2020 
-# to understand customer behavior patterns and identify strategies 
-# to better market to casual riders, with the goal of converting them into annual subscribers.
 
-# ---- Libraries ----
+## ---- Libraries ----
 library(tidyverse)
 library(lubridate)
 library(readr)
 library(scales)
 
 # ---- Data Loading and Cleaning ----
-# Function to load and clean data for a given quarter and year
+## Function to load and clean data for a given quarter and year
 load_and_clean_data <- function(file_name, year) {
   df <- read_csv(file_name)
   
